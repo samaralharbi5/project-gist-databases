@@ -1,0 +1,112 @@
+import requests
+import mysql.connector
+from mysql.connector import Error
+from datetime import datetime
+from models import Gist  # Assuming Gist model is defined in models.py
+
+# Database configuration
+DB_CONFIG = {
+    'user': 'root',
+    'password': 'my-secret-pw',
+    'host': 'localhost',
+    'database': 'gist_db'
+}
+
+# Helper function to execute SQL commands
+def execute_query(db, query, params=None, commit=True):
+    try:
+        cursor = db.cursor()
+        cursor.execute(query, params)
+        if commit:
+            db.commit()
+        print("Query executed successfully")
+    except Error as e:
+        print(f"Error: {e}")
+
+# Import gists to the database
+def import_gists_to_database(db, username, commit=True):
+    url = f"https://api.github.com/users/{username}/gists"
+    response = requests.get(url)
+    response.raise_for_status()
+    gists = response.json()
+    
+    for gist in gists:
+        query = """
+        INSERT INTO gists (gist_id, description, created_at, updated_at, url)
+        VALUES (%s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE description = VALUES(description), created_at = VALUES(created_at), updated_at = VALUES(updated_at), url = VALUES(url)
+        """
+        params = (
+            gist['id'],
+            gist.get('description', ''),
+            gist['created_at'],
+            gist['updated_at'],
+            gist['html_url']
+        )
+        execute_query(db, query, params, commit)
+
+# Search gists in the database
+def search_gists(db_connection, github_id=None, created_at=None, created_at__gt=None, created_at__gte=None, created_at__lt=None, created_at__lte=None, updated_at__gt=None, updated_at__gte=None, updated_at__lt=None, updated_at__lte=None):
+    query = "SELECT * FROM gists WHERE 1=1"
+    params = {}
+    
+    if github_id:
+        query += " AND gist_id = %(github_id)s"
+        params['github_id'] = github_id
+    if created_at:
+        query += " AND datetime(created_at) = datetime(%(created_at)s)"
+        params['created_at'] = created_at
+    if created_at__gt:
+        query += " AND datetime(created_at) > datetime(%(created_at__gt)s)"
+        params['created_at__gt'] = created_at__gt
+    if created_at__gte:
+        query += " AND datetime(created_at) >= datetime(%(created_at__gte)s)"
+        params['created_at__gte'] = created_at__gte
+    if created_at__lt:
+        query += " AND datetime(created_at) < datetime(%(created_at__lt)s)"
+        params['created_at__lt'] = created_at__lt
+    if created_at__lte:
+        query += " AND datetime(created_at) <= datetime(%(created_at__lte)s)"
+        params['created_at__lte'] = created_at__lte
+    if updated_at__gt:
+        query += " AND datetime(updated_at) > datetime(%(updated_at__gt)s)"
+        params['updated_at__gt'] = updated_at__gt
+    if updated_at__gte:
+        query += " AND datetime(updated_at) >= datetime(%(updated_at__gte)s)"
+        params['updated_at__gte'] = updated_at__gte
+    if updated_at__lt:
+        query += " AND datetime(updated_at) < datetime(%(updated_at__lt)s)"
+        params['updated_at__lt'] = updated_at__lt
+    if updated_at__lte:
+        query += " AND datetime(updated_at) <= datetime(%(updated_at__lte)s)"
+        params['updated_at__lte'] = updated_at__lte
+
+    try:
+        cursor = db_connection.cursor(dictionary=True)
+        cursor.execute(query, params)
+        results = cursor.fetchall()
+        gists = [Gist(**result) for result in results]
+        return gists
+    except Error as e:
+        print(f"Error: {e}")
+    finally:
+        cursor.close()
+
+# Example usage
+if __name__ == "__main__":
+    # Connect to database
+    db = mysql.connector.connect(**DB_CONFIG)
+    
+    # Import gists
+    print("Importing gists...")
+    import_gists_to_database(db, 'gvanrossum')
+    
+    # Search for gists
+    print("Searching for gists...")
+    gists = search_gists(db, created_at__gte=datetime(2024, 1, 1))
+    for gist in gists:
+        print(gist)
+
+    # Close the database connection
+    if db.is_connected():
+        db.close()
